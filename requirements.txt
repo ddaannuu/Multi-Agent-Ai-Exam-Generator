@@ -1,0 +1,9 @@
+langgraph
+langchain-groq
+langchain-core
+groq
+beautifulsoup4
+requests
+lxml
+gradio
+ddgs
