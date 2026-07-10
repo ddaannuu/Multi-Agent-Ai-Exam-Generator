@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: multi-agent-ai-belajar
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false   # diisi manual lewat dashboard Render (Environment tab), jangan taruh value di sini
+    autoDeploy: true

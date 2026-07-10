@@ -322,9 +322,9 @@ def agent_combine_nilai(state: AgentState) -> AgentState:
     skor_essay = hasil_essay.get("skor_rata_rata")
     komponen = []
     if skor_pg is not None:
-        komponen.append((skor_pg, 0.7))
+        komponen.append((skor_pg, 0.4))
     if skor_essay is not None:
-        komponen.append((skor_essay, 0.3))
+        komponen.append((skor_essay, 0.6))
     if komponen:
         total_bobot = sum(b for _, b in komponen)
         nilai_akhir = sum(s * b for s, b in komponen) / total_bobot
@@ -586,4 +586,14 @@ with gr.Blocks(title="Multi-Agent AI Paralel: Belajar & Latihan Soal") as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    # Render menyuntikkan port lewat env var PORT, dan mewajibkan bind ke 0.0.0.0
+    # (bukan 127.0.0.1) supaya bisa diakses dari luar container.
+    #
+    # ssr_mode=False WAJIB di-set eksplisit: Gradio (versi 5 ke atas) otomatis
+    # mengaktifkan mode SSR (server-side rendering) lewat proses Node.js terpisah
+    # kalau Node terdeteksi di environment build Render. Proses Node itu bisa
+    # bind ke port yang BEDA dari server_port yang kita minta -- inilah penyebab
+    # umum error "No open ports detected on 0.0.0.0" di Render. Mematikan SSR
+    # memastikan Gradio hanya membuka SATU port, yaitu yang kita tentukan sendiri.
+    port = int(os.environ.get("PORT", 7860))
+    demo.launch(server_name="0.0.0.0", server_port=port, ssr_mode=False)
