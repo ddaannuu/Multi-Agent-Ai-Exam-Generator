@@ -324,7 +324,7 @@ def agent_combine_nilai(state: AgentState) -> AgentState:
     if skor_pg is not None:
         komponen.append((skor_pg, 0.7))
     if skor_essay is not None:
-        komponen.append((skor_essay, 0.)3)
+        komponen.append((skor_essay, 0.3))
     if komponen:
         total_bobot = sum(b for _, b in komponen)
         nilai_akhir = sum(s * b for s, b in komponen) / total_bobot
