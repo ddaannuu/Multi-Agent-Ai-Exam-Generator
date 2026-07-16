@@ -475,7 +475,7 @@ def cari_materi(level_label, topik, jumlah_pg, jumlah_essay):
     materi_md = result.get("materi", "_Materi gagal dibuat._")
     sumber_md = ""
     if result.get("sumber"):
-        sumber_md = "**📚 Sumber rujukan (dicari & di-scrape otomatis):**\n" + "\n".join(f"- {s}" for s in result["sumber"])
+        sumber_md = "**Sumber rujukan (dicari & di-scrape otomatis):**\n" + "\n".join(f"- {s}" for s in result["sumber"])
 
     # generate percobaan pertama langsung
     soal_state = soal_graph.invoke(result)
@@ -503,7 +503,7 @@ def cari_materi(level_label, topik, jumlah_pg, jumlah_essay):
         else:
             essay_updates.append(gr.update(visible=False))
 
-    status_md = f"🧭 **Percobaan ke-1** dari maksimal {MAX_PERCOBAAN_DEFAULT} • 🎯 Target nilai: {TARGET_SKOR_DEFAULT}"
+    status_md = f"**Percobaan ke-1** dari maksimal {MAX_PERCOBAAN_DEFAULT} • 🎯 Target nilai: {TARGET_SKOR_DEFAULT}"
 
     return (
         materi_md,          # materi_out
@@ -559,13 +559,13 @@ def submit_jawaban(state, *answers):
     percobaan_ke = state.get("percobaan_ke", 1)
     nilai_akhir = final_state.get("nilai_akhir", 0)
 
-    nilai_text = f"## ⭐ Nilai Percobaan ke-{percobaan_ke}: {nilai_akhir} / 100  _(target: {target})_\n\n"
+    nilai_text = f"## Nilai Percobaan ke-{percobaan_ke}: {nilai_akhir} / 100  _(target: {target})_\n\n"
     hasil_pg = final_state.get("hasil_pg", {})
     if hasil_pg.get("total"):
-        nilai_text += f"**✅ Pilihan Ganda:** {hasil_pg['jumlah_benar']} / {hasil_pg['total']} benar (skor {hasil_pg['skor']:.1f})\n\n"
+        nilai_text += f"**Pilihan Ganda:** {hasil_pg['jumlah_benar']} / {hasil_pg['total']} benar (skor {hasil_pg['skor']:.1f})\n\n"
     hasil_essay = final_state.get("hasil_essay", {})
     if hasil_essay.get("skor_rata_rata") is not None:
-        nilai_text += f"**📝 Essay (rata-rata):** {hasil_essay['skor_rata_rata']:.1f}\n\n"
+        nilai_text += f"**Essay (rata-rata):** {hasil_essay['skor_rata_rata']:.1f}\n\n"
         for i, d in enumerate(hasil_essay.get("detail", []), 1):
             nilai_text += f"- Essay {i}: skor {d['skor']:.0f} — _{d['feedback']}_\n"
 
@@ -578,14 +578,14 @@ def submit_jawaban(state, *answers):
 
     if lulus:
         nilai_text += f"\n\n🎉 **SELAMAT! Nilai sudah mencapai target ({target}). Latihan selesai.**"
-        status_md = f"**Status: LULUS ✅** • Percobaan ke-{percobaan_ke} • Nilai {nilai_akhir}"
+        status_md = f"**Status: LULUS ** • Percobaan ke-{percobaan_ke} • Nilai {nilai_akhir}"
         for i in range(MAX_PG_SLOT):
             pg_updates[i] = gr.update(interactive=False)
         for i in range(MAX_ESSAY_SLOT):
             essay_updates[i] = gr.update(interactive=False)
     elif percobaan_ke >= max_percobaan:
-        nilai_text += f"\n\n⚠️ **Sudah mencapai batas maksimal {max_percobaan} percobaan tanpa mencapai target.** Pelajari kembali evaluasi di atas."
-        status_md = f"**Status: BELUM MENCAPAI TARGET ⚠️** • Percobaan ke-{percobaan_ke}/{max_percobaan} (batas maksimal tercapai)"
+        nilai_text += f"\n\n **Sudah mencapai batas maksimal {max_percobaan} percobaan tanpa mencapai target.** Pelajari kembali evaluasi di atas."
+        status_md = f"**Status: BELUM MENCAPAI TARGET** • Percobaan ke-{percobaan_ke}/{max_percobaan} (batas maksimal tercapai)"
         for i in range(MAX_PG_SLOT):
             pg_updates[i] = gr.update(interactive=False)
         for i in range(MAX_ESSAY_SLOT):
@@ -618,7 +618,7 @@ def submit_jawaban(state, *answers):
             else:
                 essay_updates[i] = gr.update(visible=False)
 
-        status_md = f"🧭 **Percobaan ke-{percobaan_baru}** dari maksimal {max_percobaan} • 🎯 Target nilai: {target}"
+        status_md = f"**Percobaan ke-{percobaan_baru}** dari maksimal {max_percobaan} • 🎯 Target nilai: {target}"
         lanjut_soal_visible = True
 
     return (
@@ -687,7 +687,7 @@ with gr.Blocks(title="EduAgent AI — Belajar & Latihan Soal Otomatis", theme=th
     with gr.Tabs(selected=0) as tabs:
 
         # =============== HALAMAN 1: TOPIK, MATERI, PDF ===============
-        with gr.Tab("1️⃣ Topik & Materi", id=0):
+        with gr.Tab("Topik & Materi", id=0):
             gr.Markdown(
                 "Pilih **level**, ketik **topik** (tanpa perlu URL) — agent akan **mencari & scraping materi secara otomatis**, "
                 "lalu merangkumnya jadi materi belajar."
@@ -699,50 +699,50 @@ with gr.Blocks(title="EduAgent AI — Belajar & Latihan Soal Otomatis", theme=th
                 with gr.Row():
                     jumlah_pg_in = gr.Slider(1, MAX_PG_SLOT, value=DEFAULT_JUMLAH_PG, step=1, label=f"Jumlah Soal Pilihan Ganda (maks {MAX_PG_SLOT})")
                     jumlah_essay_in = gr.Slider(1, MAX_ESSAY_SLOT, value=DEFAULT_JUMLAH_ESSAY, step=1, label=f"Jumlah Soal Essay (maks {MAX_ESSAY_SLOT})")
-                btn_cari = gr.Button("🔎 Cari Materi & Buat Soal (Otomatis, Paralel)", variant="primary", elem_classes="primary-cta")
+                btn_cari = gr.Button("Cari Materi & Buat Soal (Otomatis, Paralel)", variant="primary", elem_classes="primary-cta")
 
             with gr.Group(elem_classes="card-section"):
-                gr.Markdown("### 📄 Materi Rangkuman")
+                gr.Markdown("###Materi Rangkuman")
                 materi_out = gr.Markdown(label="Materi")
                 sumber_out = gr.Markdown(label="Sumber")
 
             with gr.Group(elem_classes="card-section"):
                 gr.Markdown(
-                    "### 📥 Unduh Materi Mentah (Sebelum Rangkuman)\n"
+                    "###Unduh Materi Mentah (Sebelum Rangkuman)\n"
                     "Opsional — unduh konten hasil scraping asli (sebelum diringkas oleh AI) dalam bentuk PDF."
                 )
-                download_pdf_btn = gr.Button("📥 Buat & Unduh PDF Materi Mentah", visible=False)
+                download_pdf_btn = gr.Button("Buat & Unduh PDF Materi Mentah", visible=False)
                 pdf_file_out = gr.File(label="File PDF Materi Mentah", visible=False)
 
-            lanjut_ke_soal_btn = gr.Button("Lanjut ke Soal ➡️", variant="secondary", visible=False)
+            lanjut_ke_soal_btn = gr.Button("Lanjut ke Soal", variant="secondary", visible=False)
 
         # =============== HALAMAN 2: SOAL & JAWABAN ===============
-        with gr.Tab("2️⃣ Soal & Jawaban", id=1):
+        with gr.Tab("Soal & Jawaban", id=1):
             status_out = gr.Markdown(label="Status Percobaan", elem_classes="status-badge")
 
             with gr.Group(elem_classes="card-section"):
-                gr.Markdown("### ✅ Soal Pilihan Ganda")
+                gr.Markdown("### Soal Pilihan Ganda")
                 pg_radios = [gr.Radio(visible=False, label=f"Soal PG {i+1}") for i in range(MAX_PG_SLOT)]
 
             with gr.Group(elem_classes="card-section"):
-                gr.Markdown("### ✍️ Soal Essay")
+                gr.Markdown("### Soal Essay")
                 essay_boxes = [gr.Textbox(visible=False, label=f"Essay {i+1}", lines=3) for i in range(MAX_ESSAY_SLOT)]
 
             btn_submit = gr.Button(
-                f"✅ Kumpulkan Jawaban & Nilai (Loop otomatis sampai nilai ≥ {TARGET_SKOR_DEFAULT})",
+                f"Kumpulkan Jawaban & Nilai (Loop otomatis sampai nilai ≥ {TARGET_SKOR_DEFAULT})",
                 variant="primary",
                 elem_classes="primary-cta",
             )
 
         # =============== HALAMAN 3: NILAI & EVALUASI ===============
-        with gr.Tab("3️⃣ Nilai & Evaluasi", id=2):
+        with gr.Tab("Nilai & Evaluasi", id=2):
             with gr.Group(elem_classes="card-section"):
                 nilai_out = gr.Markdown(label="Nilai")
             with gr.Group(elem_classes="card-section"):
-                gr.Markdown("### 🧭 Evaluasi & Rekomendasi Belajar")
+                gr.Markdown("### Evaluasi & Rekomendasi Belajar")
                 evaluasi_out = gr.Markdown(label="Evaluasi")
 
-            kembali_soal_btn = gr.Button("⬅️ Kerjakan Soal Berikutnya", variant="primary", visible=False, elem_classes="primary-cta")
+            kembali_soal_btn = gr.Button("Kerjakan Soal Berikutnya", variant="primary", visible=False, elem_classes="primary-cta")
 
     # ---------------- WIRING ----------------
 
