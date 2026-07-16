@@ -2,11 +2,13 @@ import os
 import re
 import json
 import time
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from bs4 import BeautifulSoup
 import gradio as gr
+from fpdf import FPDF
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
@@ -15,6 +17,12 @@ from typing import TypedDict, List, Dict, Optional
 GROQ_MODEL = "llama-3.3-70b-versatile"
 TARGET_SKOR_DEFAULT = 80
 MAX_PERCOBAAN_DEFAULT = 5
+
+# Batas maksimal soal per sesi (juga menentukan jumlah slot komponen di UI)
+MAX_PG_SLOT = 25
+MAX_ESSAY_SLOT = 10
+DEFAULT_JUMLAH_PG = 10
+DEFAULT_JUMLAH_ESSAY = 5
 
 LEVEL_LABEL = {"beginner": "Beginner (Pemula)", "medium": "Medium (Menengah)", "advanced": "Advanced (Lanjutan)"}
 
@@ -67,6 +75,58 @@ def extract_json(text):
     if match:
         text = match.group(1)
     return json.loads(text)
+
+
+# ---------------- UTIL: PDF MATERI MENTAH (SEBELUM SUMMARY) ----------------
+
+def _sanitize_pdf_text(text: str) -> str:
+    """Bersihkan karakter unicode umum yang tidak didukung font PDF standar (latin-1)."""
+    if not text:
+        return ""
+    replacements = {
+        "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+        "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u2022": "-",
+        "\u00a0": " ",
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+    return text.encode("latin-1", "ignore").decode("latin-1")
+
+
+def generate_pdf_materi_mentah(topik: str, level_label: str, raw_content: str, sumber: List[str]) -> str:
+    """Membuat PDF berisi konten hasil scraping MENTAH (sebelum dirangkum oleh agent summarizer)."""
+    pdf = FPDF(format="A4")
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.add_page()
+
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.multi_cell(0, 9, _sanitize_pdf_text(f"Materi Hasil Scraping (Mentah)"))
+    pdf.set_font("Helvetica", "", 11)
+    pdf.set_text_color(90, 90, 90)
+    pdf.multi_cell(0, 6, _sanitize_pdf_text(f"Topik: {topik}"))
+    pdf.multi_cell(0, 6, _sanitize_pdf_text(f"Level: {level_label}"))
+    pdf.multi_cell(0, 6, _sanitize_pdf_text(f"Dibuat: {time.strftime('%d %B %Y %H:%M')}"))
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(3)
+
+    if sumber:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.multi_cell(0, 7, "Sumber Rujukan:")
+        pdf.set_font("Helvetica", "", 10)
+        for s in sumber:
+            pdf.multi_cell(0, 6, _sanitize_pdf_text(f"- {s}"))
+        pdf.ln(3)
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.multi_cell(0, 7, "Konten Mentah:")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.multi_cell(0, 5.5, _sanitize_pdf_text(raw_content or "(Tidak ada konten)"))
+
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", topik or "materi").strip("_")[:40] or "materi"
+    filename = f"materi_mentah_{slug}_{int(time.time())}.pdf"
+    filepath = os.path.join(tempfile.gettempdir(), filename)
+    pdf.output(filepath)
+    return filepath
 
 
 class AgentState(TypedDict, total=False):
@@ -203,7 +263,7 @@ def agent_summarizer(state: AgentState) -> AgentState:
 
 def agent_generate_pg(state: AgentState) -> Dict:
     materi = state.get("materi", "")
-    jumlah_pg = state.get("jumlah_pg", 5)
+    jumlah_pg = state.get("jumlah_pg", DEFAULT_JUMLAH_PG)
     level = state.get("level", "medium")
     riwayat = state.get("riwayat_soal_pg", [])
     if not materi:
@@ -233,7 +293,7 @@ Balas HANYA JSON: {{"soal_pg": [{{"soal": "...", "pilihan": {{"A":"...","B":"...
 
 def agent_generate_essay(state: AgentState) -> Dict:
     materi = state.get("materi", "")
-    jumlah_essay = state.get("jumlah_essay", 3)
+    jumlah_essay = state.get("jumlah_essay", DEFAULT_JUMLAH_ESSAY)
     level = state.get("level", "medium")
     riwayat = state.get("riwayat_soal_essay", [])
     if not materi:
@@ -388,10 +448,7 @@ grading_builder.add_edge("evaluation", END)
 grading_graph = grading_builder.compile()
 
 
-# ---------------- GRADIO APP ----------------
-MAX_PG_SLOT = 6
-MAX_ESSAY_SLOT = 4
-
+# ---------------- GRADIO CALLBACKS ----------------
 
 def cari_materi(level_label, topik, jumlah_pg, jumlah_essay):
     if not topik or not topik.strip():
@@ -416,8 +473,9 @@ def cari_materi(level_label, topik, jumlah_pg, jumlah_essay):
         raise gr.Error(result["error"])
 
     materi_md = result.get("materi", "_Materi gagal dibuat._")
+    sumber_md = ""
     if result.get("sumber"):
-        materi_md += "\n\n---\n**Sumber rujukan (dicari & di-scrape otomatis):**\n" + "\n".join(f"- {s}" for s in result["sumber"])
+        sumber_md = "**📚 Sumber rujukan (dicari & di-scrape otomatis):**\n" + "\n".join(f"- {s}" for s in result["sumber"])
 
     # generate percobaan pertama langsung
     soal_state = soal_graph.invoke(result)
@@ -433,7 +491,7 @@ def cari_materi(level_label, topik, jumlah_pg, jumlah_essay):
         if i < len(soal_pg):
             s = soal_pg[i]
             choices = [f'{k}. {v}' for k, v in s["pilihan"].items()]
-            pg_updates.append(gr.update(visible=True, label=f"Soal {i+1}: {s['soal']}", choices=choices, value=None))
+            pg_updates.append(gr.update(visible=True, label=f"Soal {i+1}: {s['soal']}", choices=choices, value=None, interactive=True))
         else:
             pg_updates.append(gr.update(visible=False))
 
@@ -441,13 +499,38 @@ def cari_materi(level_label, topik, jumlah_pg, jumlah_essay):
     soal_essay = result.get("soal_essay", [])
     for i in range(MAX_ESSAY_SLOT):
         if i < len(soal_essay):
-            essay_updates.append(gr.update(visible=True, label=f"Essay {i+1}: {soal_essay[i]['soal']}", value=""))
+            essay_updates.append(gr.update(visible=True, label=f"Essay {i+1}: {soal_essay[i]['soal']}", value="", interactive=True))
         else:
             essay_updates.append(gr.update(visible=False))
 
-    status_md = f"**Percobaan ke-1** dari maksimal {MAX_PERCOBAAN_DEFAULT} • Target nilai: {TARGET_SKOR_DEFAULT}"
+    status_md = f"🧭 **Percobaan ke-1** dari maksimal {MAX_PERCOBAAN_DEFAULT} • 🎯 Target nilai: {TARGET_SKOR_DEFAULT}"
 
-    return (materi_md, result, status_md, "", "", *pg_updates, *essay_updates)
+    return (
+        materi_md,          # materi_out
+        sumber_md,          # sumber_out
+        result,             # state_box
+        status_md,          # status_out
+        "",                 # nilai_out (reset)
+        "",                 # evaluasi_out (reset)
+        gr.update(visible=True),   # lanjut_ke_soal_btn
+        gr.update(visible=True),   # download_pdf_btn
+        gr.update(visible=False, value=None),  # pdf_file_out (reset, belum di-generate)
+        *pg_updates,
+        *essay_updates,
+    )
+
+
+def buat_pdf_materi_mentah(state):
+    if not state or not state.get("raw_content"):
+        raise gr.Error("Belum ada materi hasil scraping. Cari materi terlebih dahulu.")
+    level_label = LEVEL_LABEL.get(state.get("level", "medium"), "Medium")
+    filepath = generate_pdf_materi_mentah(
+        topik=state.get("topik", ""),
+        level_label=level_label,
+        raw_content=state.get("raw_content", ""),
+        sumber=state.get("sumber", []),
+    )
+    return gr.update(value=filepath, visible=True)
 
 
 def submit_jawaban(state, *answers):
@@ -476,13 +559,13 @@ def submit_jawaban(state, *answers):
     percobaan_ke = state.get("percobaan_ke", 1)
     nilai_akhir = final_state.get("nilai_akhir", 0)
 
-    nilai_text = f"## ⭐ Nilai Percobaan ke-{percobaan_ke}: {nilai_akhir} / 100 (target: {target})\n\n"
+    nilai_text = f"## ⭐ Nilai Percobaan ke-{percobaan_ke}: {nilai_akhir} / 100  _(target: {target})_\n\n"
     hasil_pg = final_state.get("hasil_pg", {})
     if hasil_pg.get("total"):
-        nilai_text += f"**Pilihan Ganda:** {hasil_pg['jumlah_benar']} / {hasil_pg['total']} benar (skor {hasil_pg['skor']:.1f})\n\n"
+        nilai_text += f"**✅ Pilihan Ganda:** {hasil_pg['jumlah_benar']} / {hasil_pg['total']} benar (skor {hasil_pg['skor']:.1f})\n\n"
     hasil_essay = final_state.get("hasil_essay", {})
     if hasil_essay.get("skor_rata_rata") is not None:
-        nilai_text += f"**Essay (rata-rata):** {hasil_essay['skor_rata_rata']:.1f}\n\n"
+        nilai_text += f"**📝 Essay (rata-rata):** {hasil_essay['skor_rata_rata']:.1f}\n\n"
         for i, d in enumerate(hasil_essay.get("detail", []), 1):
             nilai_text += f"- Essay {i}: skor {d['skor']:.0f} — _{d['feedback']}_\n"
 
@@ -491,6 +574,7 @@ def submit_jawaban(state, *answers):
     lulus = nilai_akhir >= target
     pg_updates = [gr.update() for _ in range(MAX_PG_SLOT)]
     essay_updates = [gr.update() for _ in range(MAX_ESSAY_SLOT)]
+    lanjut_soal_visible = False
 
     if lulus:
         nilai_text += f"\n\n🎉 **SELAMAT! Nilai sudah mencapai target ({target}). Latihan selesai.**"
@@ -508,7 +592,7 @@ def submit_jawaban(state, *answers):
             essay_updates[i] = gr.update(interactive=False)
     else:
         # ---- Nilai belum mencapai target: buat soal BARU otomatis untuk percobaan berikutnya ----
-        nilai_text += f"\n\n📌 **Nilai belum mencapai target {target}. Soal baru sudah disiapkan di bawah — silakan kerjakan lagi.**"
+        nilai_text += f"\n\n📌 **Nilai belum mencapai target {target}. Soal baru sudah disiapkan — klik tombol di bawah untuk mengerjakan lagi.**"
         percobaan_baru = percobaan_ke + 1
         state["percobaan_ke"] = percobaan_baru
 
@@ -534,55 +618,164 @@ def submit_jawaban(state, *answers):
             else:
                 essay_updates[i] = gr.update(visible=False)
 
-        status_md = f"**Percobaan ke-{percobaan_baru}** dari maksimal {max_percobaan} • Target nilai: {target}"
+        status_md = f"🧭 **Percobaan ke-{percobaan_baru}** dari maksimal {max_percobaan} • 🎯 Target nilai: {target}"
+        lanjut_soal_visible = True
 
-    return (state, status_md, nilai_text, evaluasi_md, *pg_updates, *essay_updates)
+    return (
+        state,
+        status_md,
+        nilai_text,
+        evaluasi_md,
+        gr.update(visible=lanjut_soal_visible),   # kembali_soal_btn
+        gr.Tabs(selected=2),                       # tabs -> pindah ke halaman Nilai & Evaluasi
+        *pg_updates,
+        *essay_updates,
+    )
 
 
-with gr.Blocks(title="Multi-Agent AI Paralel: Belajar & Latihan Soal") as demo:
-    gr.Markdown("# 🎓 Multi-Agent AI Paralel — Cari Topik, Rangkuman, Soal, Penilaian & Evaluasi")
-    gr.Markdown(
-        "Pilih **level**, ketik **topik** (tanpa perlu URL) — agent akan **mencari & scraping otomatis**. "
-        "Arsitektur paralel (Groq + LangGraph fan-out/fan-in): "
-        "Search&Scraper → Summarizer → **{Generator PG ‖ Generator Essay}** → **{Grading PG ‖ Grading Essay}** → Combine Nilai → Evaluation. "
-        f"Jika nilai belum mencapai **{TARGET_SKOR_DEFAULT}**, soal baru otomatis dibuat sampai maksimal **{MAX_PERCOBAAN_DEFAULT} percobaan**."
+# ---------------- UI THEME & STYLE ----------------
+
+theme = gr.themes.Soft(
+    primary_hue="indigo",
+    secondary_hue="violet",
+    neutral_hue="slate",
+    font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "system-ui", "sans-serif"],
+)
+
+custom_css = """
+.gradio-container { max-width: 1080px !important; margin: 0 auto !important; }
+#header-banner {
+    text-align: center;
+    padding: 28px 20px;
+    background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%);
+    border-radius: 18px;
+    color: white !important;
+    margin-bottom: 18px;
+    box-shadow: 0 8px 24px rgba(79, 70, 229, 0.25);
+}
+#header-banner h1 { margin: 0; font-size: 26px; font-weight: 700; color: white !important; }
+#header-banner p { margin: 8px 0 0; opacity: 0.92; font-size: 14px; color: white !important; }
+.card-section {
+    border: 1px solid var(--border-color-primary);
+    border-radius: 16px;
+    padding: 18px 20px;
+    background: var(--background-fill-secondary);
+    margin-bottom: 14px;
+}
+.status-badge textarea, .status-badge {
+    font-weight: 600 !important;
+}
+.primary-cta button {
+    font-weight: 600 !important;
+    border-radius: 12px !important;
+}
+footer { display: none !important; }
+"""
+
+with gr.Blocks(title="EduAgent AI — Belajar & Latihan Soal Otomatis", theme=theme, css=custom_css) as demo:
+    gr.HTML(
+        """
+        <div id="header-banner">
+            <h1>🎓 EduAgent AI</h1>
+            <p>Multi-Agent AI Paralel • Cari Topik → Rangkuman → Soal → Penilaian → Evaluasi</p>
+        </div>
+        """
     )
 
     state_box = gr.State(None)
 
-    with gr.Row():
-        level_in = gr.Radio(choices=list(LEVEL_LABEL.values()), value=LEVEL_LABEL["medium"], label="Level Kesulitan")
-        topik_in = gr.Textbox(label="Topik yang Ingin Dipelajari", placeholder="mis. jenis-jenis machine learning")
-    with gr.Row():
-        jumlah_pg_in = gr.Slider(1, MAX_PG_SLOT, value=5, step=1, label="Jumlah Soal PG per Sesi")
-        jumlah_essay_in = gr.Slider(1, MAX_ESSAY_SLOT, value=3, step=1, label="Jumlah Soal Essay per Sesi")
+    with gr.Tabs(selected=0) as tabs:
 
-    btn_cari = gr.Button("🔎 Cari Materi & Buat Soal (Otomatis, Paralel)", variant="primary")
+        # =============== HALAMAN 1: TOPIK, MATERI, PDF ===============
+        with gr.Tab("1️⃣ Topik & Materi", id=0):
+            gr.Markdown(
+                "Pilih **level**, ketik **topik** (tanpa perlu URL) — agent akan **mencari & scraping materi secara otomatis**, "
+                "lalu merangkumnya jadi materi belajar."
+            )
+            with gr.Group(elem_classes="card-section"):
+                with gr.Row():
+                    level_in = gr.Radio(choices=list(LEVEL_LABEL.values()), value=LEVEL_LABEL["medium"], label="Level Kesulitan")
+                    topik_in = gr.Textbox(label="Topik yang Ingin Dipelajari", placeholder="mis. jenis-jenis machine learning")
+                with gr.Row():
+                    jumlah_pg_in = gr.Slider(1, MAX_PG_SLOT, value=DEFAULT_JUMLAH_PG, step=1, label=f"Jumlah Soal Pilihan Ganda (maks {MAX_PG_SLOT})")
+                    jumlah_essay_in = gr.Slider(1, MAX_ESSAY_SLOT, value=DEFAULT_JUMLAH_ESSAY, step=1, label=f"Jumlah Soal Essay (maks {MAX_ESSAY_SLOT})")
+                btn_cari = gr.Button("🔎 Cari Materi & Buat Soal (Otomatis, Paralel)", variant="primary", elem_classes="primary-cta")
 
-    materi_out = gr.Markdown(label="Materi")
-    status_out = gr.Markdown(label="Status Percobaan")
+            with gr.Group(elem_classes="card-section"):
+                gr.Markdown("### 📄 Materi Rangkuman")
+                materi_out = gr.Markdown(label="Materi")
+                sumber_out = gr.Markdown(label="Sumber")
 
-    gr.Markdown("## Soal Pilihan Ganda")
-    pg_radios = [gr.Radio(visible=False, label=f"Soal PG {i+1}") for i in range(MAX_PG_SLOT)]
+            with gr.Group(elem_classes="card-section"):
+                gr.Markdown(
+                    "### 📥 Unduh Materi Mentah (Sebelum Rangkuman)\n"
+                    "Opsional — unduh konten hasil scraping asli (sebelum diringkas oleh AI) dalam bentuk PDF."
+                )
+                download_pdf_btn = gr.Button("📥 Buat & Unduh PDF Materi Mentah", visible=False)
+                pdf_file_out = gr.File(label="File PDF Materi Mentah", visible=False)
 
-    gr.Markdown("## Soal Essay")
-    essay_boxes = [gr.Textbox(visible=False, label=f"Essay {i+1}", lines=3) for i in range(MAX_ESSAY_SLOT)]
+            lanjut_ke_soal_btn = gr.Button("Lanjut ke Soal ➡️", variant="secondary", visible=False)
 
-    btn_submit = gr.Button(f"✅ Kumpulkan Jawaban & Nilai (Loop otomatis sampai nilai ≥ {TARGET_SKOR_DEFAULT})", variant="primary")
+        # =============== HALAMAN 2: SOAL & JAWABAN ===============
+        with gr.Tab("2️⃣ Soal & Jawaban", id=1):
+            status_out = gr.Markdown(label="Status Percobaan", elem_classes="status-badge")
 
-    nilai_out = gr.Markdown(label="Nilai")
-    evaluasi_out = gr.Markdown(label="Evaluasi")
+            with gr.Group(elem_classes="card-section"):
+                gr.Markdown("### ✅ Soal Pilihan Ganda")
+                pg_radios = [gr.Radio(visible=False, label=f"Soal PG {i+1}") for i in range(MAX_PG_SLOT)]
+
+            with gr.Group(elem_classes="card-section"):
+                gr.Markdown("### ✍️ Soal Essay")
+                essay_boxes = [gr.Textbox(visible=False, label=f"Essay {i+1}", lines=3) for i in range(MAX_ESSAY_SLOT)]
+
+            btn_submit = gr.Button(
+                f"✅ Kumpulkan Jawaban & Nilai (Loop otomatis sampai nilai ≥ {TARGET_SKOR_DEFAULT})",
+                variant="primary",
+                elem_classes="primary-cta",
+            )
+
+        # =============== HALAMAN 3: NILAI & EVALUASI ===============
+        with gr.Tab("3️⃣ Nilai & Evaluasi", id=2):
+            with gr.Group(elem_classes="card-section"):
+                nilai_out = gr.Markdown(label="Nilai")
+            with gr.Group(elem_classes="card-section"):
+                gr.Markdown("### 🧭 Evaluasi & Rekomendasi Belajar")
+                evaluasi_out = gr.Markdown(label="Evaluasi")
+
+            kembali_soal_btn = gr.Button("⬅️ Kerjakan Soal Berikutnya", variant="primary", visible=False, elem_classes="primary-cta")
+
+    # ---------------- WIRING ----------------
 
     btn_cari.click(
         cari_materi,
         inputs=[level_in, topik_in, jumlah_pg_in, jumlah_essay_in],
-        outputs=[materi_out, state_box, status_out, nilai_out, evaluasi_out, *pg_radios, *essay_boxes],
+        outputs=[
+            materi_out, sumber_out, state_box, status_out, nilai_out, evaluasi_out,
+            lanjut_ke_soal_btn, download_pdf_btn, pdf_file_out,
+            *pg_radios, *essay_boxes,
+        ],
+    )
+
+    download_pdf_btn.click(
+        buat_pdf_materi_mentah,
+        inputs=[state_box],
+        outputs=[pdf_file_out],
+    )
+
+    lanjut_ke_soal_btn.click(
+        lambda: gr.Tabs(selected=1),
+        outputs=[tabs],
     )
 
     btn_submit.click(
         submit_jawaban,
         inputs=[state_box, *pg_radios, *essay_boxes],
-        outputs=[state_box, status_out, nilai_out, evaluasi_out, *pg_radios, *essay_boxes],
+        outputs=[state_box, status_out, nilai_out, evaluasi_out, kembali_soal_btn, tabs, *pg_radios, *essay_boxes],
+    )
+
+    kembali_soal_btn.click(
+        lambda: gr.Tabs(selected=1),
+        outputs=[tabs],
     )
 
 if __name__ == "__main__":
