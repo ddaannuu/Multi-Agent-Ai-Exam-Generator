@@ -3,14 +3,21 @@ import re
 import json
 import time
 import tempfile
-from dotenv import load_dotenv
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # python-dotenv belum terpasang -- tidak masalah di Render, karena
+    # environment variable (mis. GROQ_API_KEY) sudah di-set langsung lewat
+    # dashboard Render, bukan lewat file .env.
+    pass
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from bs4 import BeautifulSoup
 import gradio as gr
 from fpdf import FPDF
+from fpdf.enums import WrapMode
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
@@ -92,7 +99,26 @@ def _sanitize_pdf_text(text: str) -> str:
     }
     for src, dst in replacements.items():
         text = text.replace(src, dst)
-    return text.encode("latin-1", "ignore").decode("latin-1")
+    text = text.encode("latin-1", "ignore").decode("latin-1")
+    return _break_long_tokens(text)
+
+
+def _break_long_tokens(text: str, max_len: int = 40) -> str:
+    """Sisipkan spasi ke kata/token yang sangat panjang tanpa spasi (mis. URL panjang
+    atau teks kotor hasil scraping) supaya fpdf2 tetap bisa membungkus baris. Tanpa ini,
+    fpdf2 bisa gagal total dengan error "Not enough horizontal space" saat menemukan
+    satu token yang lebih lebar dari halaman."""
+    if not text:
+        return text
+
+    def _fix_token(token: str) -> str:
+        if len(token) <= max_len:
+            return token
+        return " ".join(token[i:i + max_len] for i in range(0, len(token), max_len))
+
+    lines = text.split("\n")
+    fixed_lines = [" ".join(_fix_token(tok) for tok in line.split(" ")) for line in lines]
+    return "\n".join(fixed_lines)
 
 
 def generate_pdf_materi_mentah(topik: str, level_label: str, raw_content: str, sumber: List[str]) -> str:
@@ -102,27 +128,27 @@ def generate_pdf_materi_mentah(topik: str, level_label: str, raw_content: str, s
     pdf.add_page()
 
     pdf.set_font("Helvetica", "B", 16)
-    pdf.multi_cell(0, 9, _sanitize_pdf_text(f"Materi Hasil Scraping (Mentah)"))
+    pdf.multi_cell(0, 9, _sanitize_pdf_text("Materi Hasil Scraping (Mentah)"), wrapmode=WrapMode.CHAR)
     pdf.set_font("Helvetica", "", 11)
     pdf.set_text_color(90, 90, 90)
-    pdf.multi_cell(0, 6, _sanitize_pdf_text(f"Topik: {topik}"))
-    pdf.multi_cell(0, 6, _sanitize_pdf_text(f"Level: {level_label}"))
-    pdf.multi_cell(0, 6, _sanitize_pdf_text(f"Dibuat: {time.strftime('%d %B %Y %H:%M')}"))
+    pdf.multi_cell(0, 6, _sanitize_pdf_text(f"Topik: {topik}"), wrapmode=WrapMode.CHAR)
+    pdf.multi_cell(0, 6, _sanitize_pdf_text(f"Level: {level_label}"), wrapmode=WrapMode.CHAR)
+    pdf.multi_cell(0, 6, _sanitize_pdf_text(f"Dibuat: {time.strftime('%d %B %Y %H:%M')}"), wrapmode=WrapMode.CHAR)
     pdf.set_text_color(0, 0, 0)
     pdf.ln(3)
 
     if sumber:
         pdf.set_font("Helvetica", "B", 12)
-        pdf.multi_cell(0, 7, "Sumber Rujukan:")
+        pdf.multi_cell(0, 7, "Sumber Rujukan:", wrapmode=WrapMode.CHAR)
         pdf.set_font("Helvetica", "", 10)
         for s in sumber:
-            pdf.multi_cell(0, 6, _sanitize_pdf_text(f"- {s}"))
+            pdf.multi_cell(0, 6, _sanitize_pdf_text(f"- {s}"), wrapmode=WrapMode.CHAR)
         pdf.ln(3)
 
     pdf.set_font("Helvetica", "B", 12)
-    pdf.multi_cell(0, 7, "Konten Mentah:")
+    pdf.multi_cell(0, 7, "Konten Mentah:", wrapmode=WrapMode.CHAR)
     pdf.set_font("Helvetica", "", 10)
-    pdf.multi_cell(0, 5.5, _sanitize_pdf_text(raw_content or "(Tidak ada konten)"))
+    pdf.multi_cell(0, 5.5, _sanitize_pdf_text(raw_content or "(Tidak ada konten)"), wrapmode=WrapMode.CHAR)
 
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", topik or "materi").strip("_")[:40] or "materi"
     filename = f"materi_mentah_{slug}_{int(time.time())}.pdf"
@@ -525,12 +551,15 @@ def buat_pdf_materi_mentah(state):
     if not state or not state.get("raw_content"):
         raise gr.Error("Belum ada materi hasil scraping. Cari materi terlebih dahulu.")
     level_label = LEVEL_LABEL.get(state.get("level", "medium"), "Medium")
-    filepath = generate_pdf_materi_mentah(
-        topik=state.get("topik", ""),
-        level_label=level_label,
-        raw_content=state.get("raw_content", ""),
-        sumber=state.get("sumber", []),
-    )
+    try:
+        filepath = generate_pdf_materi_mentah(
+            topik=state.get("topik", ""),
+            level_label=level_label,
+            raw_content=state.get("raw_content", ""),
+            sumber=state.get("sumber", []),
+        )
+    except Exception as e:
+        raise gr.Error(f"Gagal membuat PDF: {e}")
     # DownloadButton: begitu value di-set ke path file, browser otomatis memicu unduhan.
     return gr.DownloadButton(value=filepath, visible=True, label="Unduh PDF Materi Mentah")
 
