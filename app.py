@@ -3,6 +3,8 @@ import re
 import json
 import time
 import tempfile
+from dotenv import load_dotenv
+load_dotenv()
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -503,7 +505,7 @@ def cari_materi(level_label, topik, jumlah_pg, jumlah_essay):
         else:
             essay_updates.append(gr.update(visible=False))
 
-    status_md = f"**Percobaan ke-1** dari maksimal {MAX_PERCOBAAN_DEFAULT} • 🎯 Target nilai: {TARGET_SKOR_DEFAULT}"
+    status_md = f"**Percobaan ke-1** dari maksimal {MAX_PERCOBAAN_DEFAULT} • Target nilai: {TARGET_SKOR_DEFAULT}"
 
     return (
         materi_md,          # materi_out
@@ -513,8 +515,7 @@ def cari_materi(level_label, topik, jumlah_pg, jumlah_essay):
         "",                 # nilai_out (reset)
         "",                 # evaluasi_out (reset)
         gr.update(visible=True),   # lanjut_ke_soal_btn
-        gr.update(visible=True),   # download_pdf_btn
-        gr.update(visible=False, value=None),  # pdf_file_out (reset, belum di-generate)
+        gr.DownloadButton(value=None, visible=True, label="Buat & Unduh PDF Materi Mentah"),  # download_pdf_btn (reset)
         *pg_updates,
         *essay_updates,
     )
@@ -530,7 +531,8 @@ def buat_pdf_materi_mentah(state):
         raw_content=state.get("raw_content", ""),
         sumber=state.get("sumber", []),
     )
-    return gr.update(value=filepath, visible=True)
+    # DownloadButton: begitu value di-set ke path file, browser otomatis memicu unduhan.
+    return gr.DownloadButton(value=filepath, visible=True, label="Unduh PDF Materi Mentah")
 
 
 def submit_jawaban(state, *answers):
@@ -577,7 +579,7 @@ def submit_jawaban(state, *answers):
     lanjut_soal_visible = False
 
     if lulus:
-        nilai_text += f"\n\n🎉 **SELAMAT! Nilai sudah mencapai target ({target}). Latihan selesai.**"
+        nilai_text += f"\n\n**SELAMAT! Nilai sudah mencapai target ({target}). Latihan selesai.**"
         status_md = f"**Status: LULUS ** • Percobaan ke-{percobaan_ke} • Nilai {nilai_akhir}"
         for i in range(MAX_PG_SLOT):
             pg_updates[i] = gr.update(interactive=False)
@@ -592,7 +594,7 @@ def submit_jawaban(state, *answers):
             essay_updates[i] = gr.update(interactive=False)
     else:
         # ---- Nilai belum mencapai target: buat soal BARU otomatis untuk percobaan berikutnya ----
-        nilai_text += f"\n\n📌 **Nilai belum mencapai target {target}. Soal baru sudah disiapkan — klik tombol di bawah untuk mengerjakan lagi.**"
+        nilai_text += f"\n\n**Nilai belum mencapai target {target}. Soal baru sudah disiapkan — klik tombol di bawah untuk mengerjakan lagi.**"
         percobaan_baru = percobaan_ke + 1
         state["percobaan_ke"] = percobaan_baru
 
@@ -618,7 +620,7 @@ def submit_jawaban(state, *answers):
             else:
                 essay_updates[i] = gr.update(visible=False)
 
-        status_md = f"**Percobaan ke-{percobaan_baru}** dari maksimal {max_percobaan} • 🎯 Target nilai: {target}"
+        status_md = f"**Percobaan ke-{percobaan_baru}** dari maksimal {max_percobaan} • Target nilai: {target}"
         lanjut_soal_visible = True
 
     return (
@@ -636,39 +638,91 @@ def submit_jawaban(state, *answers):
 # ---------------- UI THEME & STYLE ----------------
 
 theme = gr.themes.Soft(
-    primary_hue="indigo",
-    secondary_hue="violet",
+    primary_hue="blue",
+    secondary_hue="blue",
     neutral_hue="slate",
     font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "system-ui", "sans-serif"],
 )
 
 custom_css = """
+:root, .dark {
+    --body-background-fill: #ffffff !important;
+    --background-fill-primary: #ffffff !important;
+    --background-fill-secondary: #f8fafc !important;
+    --border-color-primary: #dbeafe !important;
+    --block-background-fill: #ffffff !important;
+    --body-text-color: #0f172a !important;
+    --body-text-color-subdued: #64748b !important;
+}
+
+body, .gradio-container { background: #ffffff !important; }
 .gradio-container { max-width: 1080px !important; margin: 0 auto !important; }
+
 #header-banner {
     text-align: center;
-    padding: 28px 20px;
-    background: linear-gradient(135deg, #4338ca 0%, #6d28d9 100%);
-    border-radius: 18px;
-    color: white !important;
-    margin-bottom: 18px;
-    box-shadow: 0 8px 24px rgba(79, 70, 229, 0.25);
+    padding: 26px 20px;
+    background: #ffffff;
+    border: 1px solid #dbeafe;
+    border-bottom: 3px solid #2563eb;
+    border-radius: 14px;
+    margin-bottom: 20px;
 }
-#header-banner h1 { margin: 0; font-size: 26px; font-weight: 700; color: white !important; }
-#header-banner p { margin: 8px 0 0; opacity: 0.92; font-size: 14px; color: white !important; }
+#header-banner h1 { margin: 0; font-size: 25px; font-weight: 700; color: #1e40af; letter-spacing: -0.02em; }
+#header-banner p { margin: 8px 0 0; color: #64748b; font-size: 14px; }
+
+.tab-nav button {
+    font-weight: 600 !important;
+    color: #475569 !important;
+}
+.tab-nav button.selected {
+    color: #1d4ed8 !important;
+    border-color: #1d4ed8 !important;
+}
+
 .card-section {
-    border: 1px solid var(--border-color-primary);
-    border-radius: 16px;
-    padding: 18px 20px;
-    background: var(--background-fill-secondary);
-    margin-bottom: 14px;
+    border: 1px solid #e2e8f0;
+    border-top: 3px solid #2563eb;
+    border-radius: 10px;
+    padding: 22px 24px;
+    background: #ffffff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    margin-bottom: 18px;
 }
-.status-badge textarea, .status-badge {
+
+.section-label {
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #334155 !important;
+    margin-bottom: 10px !important;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.status-badge { font-weight: 600 !important; color: #0f172a !important; }
+
+.primary-cta button, button.primary {
+    background: #2563eb !important;
+    color: #ffffff !important;
+    border: 1px solid #2563eb !important;
     font-weight: 600 !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
 }
-.primary-cta button {
+.primary-cta button:hover, button.primary:hover { background: #1d4ed8 !important; border-color: #1d4ed8 !important; }
+
+button.secondary {
+    background: #ffffff !important;
+    color: #1d4ed8 !important;
+    border: 1px solid #93c5fd !important;
     font-weight: 600 !important;
-    border-radius: 12px !important;
+    border-radius: 10px !important;
 }
+button.secondary:hover { background: #eff6ff !important; }
+
+input, textarea, select { background: #ffffff !important; }
+
 footer { display: none !important; }
 """
 
@@ -676,8 +730,8 @@ with gr.Blocks(title="EduAgent AI — Belajar & Latihan Soal Otomatis", theme=th
     gr.HTML(
         """
         <div id="header-banner">
-            <h1>🎓 EduAgent AI</h1>
-            <p>Multi-Agent AI Paralel • Cari Topik → Rangkuman → Soal → Penilaian → Evaluasi</p>
+            <h1>EduAgent AI</h1>
+            <p>Sistem Multi-Agent AI Paralel — Cari Topik, Rangkuman Materi, Latihan Soal, dan Evaluasi Otomatis</p>
         </div>
         """
     )
@@ -702,17 +756,17 @@ with gr.Blocks(title="EduAgent AI — Belajar & Latihan Soal Otomatis", theme=th
                 btn_cari = gr.Button("Cari Materi & Buat Soal (Otomatis, Paralel)", variant="primary", elem_classes="primary-cta")
 
             with gr.Group(elem_classes="card-section"):
-                gr.Markdown("###Materi Rangkuman")
+                gr.Markdown("**Materi Rangkuman**", elem_classes="section-label")
                 materi_out = gr.Markdown(label="Materi")
                 sumber_out = gr.Markdown(label="Sumber")
 
             with gr.Group(elem_classes="card-section"):
+                gr.Markdown("**Unduh Materi Mentah (Sebelum Rangkuman)**", elem_classes="section-label")
                 gr.Markdown(
-                    "###Unduh Materi Mentah (Sebelum Rangkuman)\n"
-                    "Opsional — unduh konten hasil scraping asli (sebelum diringkas oleh AI) dalam bentuk PDF."
+                    "Opsional — unduh konten hasil scraping asli (sebelum diringkas oleh AI) dalam bentuk PDF. "
+                    "Klik tombol di bawah untuk membuat sekaligus mengunduh file-nya."
                 )
-                download_pdf_btn = gr.Button("Buat & Unduh PDF Materi Mentah", visible=False)
-                pdf_file_out = gr.File(label="File PDF Materi Mentah", visible=False)
+                download_pdf_btn = gr.DownloadButton("Buat & Unduh PDF Materi Mentah", visible=False)
 
             lanjut_ke_soal_btn = gr.Button("Lanjut ke Soal", variant="secondary", visible=False)
 
@@ -721,11 +775,11 @@ with gr.Blocks(title="EduAgent AI — Belajar & Latihan Soal Otomatis", theme=th
             status_out = gr.Markdown(label="Status Percobaan", elem_classes="status-badge")
 
             with gr.Group(elem_classes="card-section"):
-                gr.Markdown("### Soal Pilihan Ganda")
+                gr.Markdown("**Soal Pilihan Ganda**", elem_classes="section-label")
                 pg_radios = [gr.Radio(visible=False, label=f"Soal PG {i+1}") for i in range(MAX_PG_SLOT)]
 
             with gr.Group(elem_classes="card-section"):
-                gr.Markdown("### Soal Essay")
+                gr.Markdown("**Soal Essay**", elem_classes="section-label")
                 essay_boxes = [gr.Textbox(visible=False, label=f"Essay {i+1}", lines=3) for i in range(MAX_ESSAY_SLOT)]
 
             btn_submit = gr.Button(
@@ -739,7 +793,7 @@ with gr.Blocks(title="EduAgent AI — Belajar & Latihan Soal Otomatis", theme=th
             with gr.Group(elem_classes="card-section"):
                 nilai_out = gr.Markdown(label="Nilai")
             with gr.Group(elem_classes="card-section"):
-                gr.Markdown("### Evaluasi & Rekomendasi Belajar")
+                gr.Markdown("**Evaluasi & Rekomendasi Belajar**", elem_classes="section-label")
                 evaluasi_out = gr.Markdown(label="Evaluasi")
 
             kembali_soal_btn = gr.Button("Kerjakan Soal Berikutnya", variant="primary", visible=False, elem_classes="primary-cta")
@@ -751,7 +805,7 @@ with gr.Blocks(title="EduAgent AI — Belajar & Latihan Soal Otomatis", theme=th
         inputs=[level_in, topik_in, jumlah_pg_in, jumlah_essay_in],
         outputs=[
             materi_out, sumber_out, state_box, status_out, nilai_out, evaluasi_out,
-            lanjut_ke_soal_btn, download_pdf_btn, pdf_file_out,
+            lanjut_ke_soal_btn, download_pdf_btn,
             *pg_radios, *essay_boxes,
         ],
     )
@@ -759,7 +813,7 @@ with gr.Blocks(title="EduAgent AI — Belajar & Latihan Soal Otomatis", theme=th
     download_pdf_btn.click(
         buat_pdf_materi_mentah,
         inputs=[state_box],
-        outputs=[pdf_file_out],
+        outputs=[download_pdf_btn],
     )
 
     lanjut_ke_soal_btn.click(
