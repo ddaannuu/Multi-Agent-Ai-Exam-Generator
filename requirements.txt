@@ -1,6 +1,7 @@
 langgraph
 langchain-groq
 langchain-core
+python-dotenv
 groq
 beautifulsoup4
 requests
