@@ -1,6 +1,8 @@
-# Multi Agent AI Eaxm Generator
+# Multi Agent AI Exam Generator
 
 Sistem belajar & latihan soal otomatis berbasis **multi-agent AI Exam Generator**. Cukup masukkan topik yang ingin dipelajari — tanpa perlu mencari sumber sendiri — sistem akan mencari materi di internet, merangkumnya, membuatkan soal latihan, menilai jawaban, dan memberi evaluasi belajar secara otomatis, dalam satu alur yang berulang sampai target nilai tercapai.
+
+https://multi-agent-ai-exam-generators.onrender.com/
 
 Dibangun dengan **Gradio**, **LangGraph**, dan **Groq (Llama 3.3 70B)**, dan siap dideploy ke **Render**.
 
